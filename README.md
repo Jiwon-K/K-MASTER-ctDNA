@@ -16,7 +16,7 @@ Pan-cancer circulating tumor DNA atlas establishes a precision oncology framewor
 
 Analyses were performed using R version 4.3.3.
 
-See sessionInfo.txt for package versions.
+
 
 ## Data availability
 
