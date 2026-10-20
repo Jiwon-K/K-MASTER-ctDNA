@@ -1,12 +1,8 @@
-# K-MASTER ctDNA
-
-This repository contains code used for the analysis in the study:
-Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification
-
-
 # K-MASTER Pan-cancer ctDNA Analysis
 
-This repository contains R scripts used for genomic and statistical analyses in the K-MASTER pan-cancer ctDNA study.
+This repository contains code used for genomic and statistical analyses in the study:
+Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification
+
 
 ## Code description
 
