@@ -27,7 +27,7 @@ The analyses used R packages for genomic data processing, statistical modeling, 
 
 Patient-level clinical and genomic data from the K-MASTER cohort are deposited in the Clinical & Omics Data Archive (CODA; accession number CODA_D23008). 
 
-Access to these data is controlled and requires approval through CODA.
+Access to these data is controlled and requires approval through CODA. The controlled-access patient-level data are not included in this repository.
 
 
 ## Usage
