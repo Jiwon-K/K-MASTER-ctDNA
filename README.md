@@ -31,3 +31,6 @@ The controlled-access patient-level data are not included in this repository.
 ## Usage
 
 The scripts require the corresponding input datasets. Data processing steps and required input files are described in the individual scripts.
+
+## For questions or support, contact:
+Jiwon Kim (greati4320@korea.ac.kr)
