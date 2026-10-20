@@ -20,6 +20,7 @@ The study analyzed 1,243 ctDNA samples across 17 advanced solid tumor types in t
 
 Analyses were performed using R version 4.3.3.
 
+The analyses used R packages for genomic data processing, statistical modeling, survival analysis, and visualization. 
 
 
 ## Data availability
@@ -34,5 +35,7 @@ Access to these data is controlled and requires approval through CODA.
 The scripts require the corresponding input datasets. Data processing steps and required input files are described in the individual scripts.
 
 
-## For questions or support, contact:
+## Contact:
+For questions regarding the analysis code, please contact:
+
 Jiwon Kim (greati4320@korea.ac.kr)
