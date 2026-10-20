@@ -10,11 +10,11 @@ The repository provides code for genomic alteration profiling, comparisons with 
 
 ## Code description
 
-- Figure1.R: K-MASTER ctDNA Genomic landscape, mutation count, MATH scores, and OncoKB annotations.
-- Figure2.R: Comparison of genomic alteration frequencies between K-MASTER and MSK-ACCESS.
-- Figure3.R: Comparison of genomic profiles between tissue and ctDNA.
-- Figure4.R: Overall survival, Molecular Prognostic Index, elastic-net Cox regression, and SHAP analyses.
-- Figure5.R: Time-to-next-treatment and pathway co-alteration analyses.
+- Fig1/Figure1.R: K-MASTER ctDNA Genomic landscape, mutation count, MATH scores, and OncoKB annotations.
+- Fig2/Figure2.R: Comparison of genomic alteration frequencies between K-MASTER and MSK-ACCESS.
+- Fig3/Figure3.R: Comparison of genomic profiles between tissue and ctDNA.
+- Fig4/Figure4.R: Overall survival, Molecular Prognostic Index, elastic-net Cox regression, and SHAP analyses.
+- Fig5/Figure5.R: Time-to-next-treatment and pathway co-alteration analyses.
 
 
 ## Software
