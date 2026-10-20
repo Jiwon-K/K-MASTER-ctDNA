@@ -1,7 +1,9 @@
 # K-MASTER Pan-cancer ctDNA Analysis
 
-This repository contains code used for genomic and statistical analyses in the study:
-Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification
+This repository contains code used for genomic and statistical analyses in the following study:
+
+*Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification*
+
 
 
 ## Code description
