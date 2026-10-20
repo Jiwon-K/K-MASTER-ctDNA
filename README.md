@@ -2,9 +2,9 @@
 
 This repository contains code used for genomic and statistical analyses in the following study:
 
-*Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification*
+> **Pan-cancer circulating tumor DNA atlas establishes a precision oncology framework for prognostic and therapeutic stratification**
 
-The study analyzed 1,243 ctDNA samples across 17 advanced solid tumor types in the K-MASTER precision oncology program. The analyses include genomic alteration profiling, comparisons with tissue sequencing and an external ctDNA cohort, prognostic modeling, and treatment outcome analyses.
+The repository provides code for genomic alteration profiling, comparisons with tissue sequencing and an external ctDNA cohort, prognostic modeling, and treatment outcome analyses.
 
 
 ## Code description
