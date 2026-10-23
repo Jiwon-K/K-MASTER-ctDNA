@@ -48,40 +48,26 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
 
 # Cohort preparation -----------------------------------------------------
-axen_final2 <- read.delim(maf_file, sep = "\t", check.names = FALSE)
-axen_final2 <- axen_final2 %>%
-  filter(!Tumor %in% c("Double cancer", "Other"))
+maf <- read.delim(maf_file, sep = "\t", check.names = FALSE)
+
 
 # Include tumor types with >=10 unique patients (17 cancer types).
-selected_tumors <- axen_final2 %>% distinct(Tumor, `SUBJECT ID`) %>%
+selected_tumors <- maf %>% distinct(Tumor, `SUBJECT ID`) %>%
   dplyr::count(Tumor, name = "n_patients") %>% filter(n_patients >= 10) %>% pull(Tumor)
-axen_final3 <- axen_final2 %>% filter(Tumor %in% selected_tumors)
-
-stopifnot(length(unique(axen_final3$Tumor)) == 17)
+maf <- maf %>% filter(Tumor %in% selected_tumors)
 # The published cohort contains 1,225 patients and 1,243 ctDNA samples.
-message("Patients: ", n_distinct(axen_final3$`SUBJECT ID`), "; samples: ", n_distinct(axen_final3$Tumor_Sample_Barcode))
+
 
 # Supplement genomic records with clinical annotations, without duplicating Tumor.
 cli <- readxl::read_xlsx(clinical_file, skip = 1)
 if (!"SUBJECT ID" %in% names(cli) && "Subject ID" %in% names(cli)) {
   cli <- cli %>% rename(`SUBJECT ID` = `Subject ID`)
 }
-# Convert Excel serial dates before merging clinical data.
-cli$Diagnosis_date_edit <- suppressWarnings(as.numeric(cli$Diagnosis_date_edit))
-cli$Diagnosis_date_edit <- as.Date(cli$Diagnosis_date_edit, origin = "1899-12-30")
 
-cli$Survival_250417 <- stringi::stri_replace_all_regex(cli$Survival_250417, vectorize = F,
-                                                       pattern = c("사망", "생존 중", "FU loss", "생존", "연구탈락"),
-                                                       replacement = c(1, 0, 0, 0, NA))
+required_clinical <- c("SUBJECT ID", "Gender", "Tumor_subtype_JW", "NGS_stage", "Birth_date", "Diagnosis_date_edit")
 
-required_clinical <- c("SUBJECT ID", "Gender", "Tumor_subtype_JW", "NGS_stage",
-                       "Birth_date", "Diagnosis_date_edit")
-stopifnot(all(required_clinical %in% names(cli)))
-# Prefer the clinical workbook for these fields if an existing MAF already has them.
-axen_final3 <- axen_final3 %>%
-  dplyr::select(-any_of(setdiff(required_clinical, "SUBJECT ID"))) %>%
-  left_join(cli %>% dplyr::select(all_of(required_clinical)) %>%
-              distinct(`SUBJECT ID`, .keep_all = TRUE), by = "SUBJECT ID")
+maf <- maf %>% dplyr::select(-any_of(setdiff(required_clinical, "SUBJECT ID"))) %>%
+  left_join(cli %>% dplyr::select(all_of(required_clinical)) %>% distinct(`SUBJECT ID`, .keep_all = TRUE), by = "SUBJECT ID")
 
 # Convert birth and diagnosis dates; Excel numeric dates are supported.
 to_date <- function(x) {
@@ -89,16 +75,16 @@ to_date <- function(x) {
   if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30"))
   suppressWarnings(as.Date(lubridate::ymd(as.character(x))))
 }
-axen_final3 <- axen_final3 %>%
+maf <- maf %>%
   mutate(Birth_date = as.Date(Birth_date), Diagnosis_date_edit = as.Date(Diagnosis_date_edit),
     Age = floor(lubridate::time_length(lubridate::interval(Birth_date, Diagnosis_date_edit), "years")),
     NGS_stage_edit = as.character(NGS_stage), NGS_stage_edit = sub("^([1-4])[A-C]$", "\\1", NGS_stage_edit))
 
 # Mutation counts follow the nonsynonymous MAF calls included by maftools.
-maf_obj <- maftools::read.maf(maf = axen_final3, verbose = FALSE)
+maf_obj <- maftools::read.maf(maf = maf, verbose = FALSE)
 mutation_counts <- data.frame(Tumor_Sample_Barcode = as.character(maf_obj@variant.type.summary$Tumor_Sample_Barcode),
                               count = as.numeric(maf_obj@variant.type.summary$total))
-axen_final3 <- axen_final3 %>%
+maf <- maf %>%
   left_join(mutation_counts, by = "Tumor_Sample_Barcode") %>%
   mutate(count_edit = if_else(count >= 3, "mut-H", "mut-L", missing = NA_character_))
 
@@ -116,19 +102,13 @@ tumor_colors <- c("Lung cancer" = "#D55E00", "Breast cancer" = "#0072B2",
 
 
 # Figure 1A: patient and tumor characteristics --------------------------
-vaf_df <- axen_final3 %>%
-  group_by(Tumor_Sample_Barcode) %>%
+vaf_df <- maf %>% group_by(Tumor_Sample_Barcode) %>%
   summarise(max_vaf = max(as.numeric(VAF), na.rm = TRUE), Tumor = first(Tumor), Gender = first(Gender),
-    Subtype = first(Tumor_subtype_JW), Stage = first(NGS_stage_edit),
-    Age = first(Age), .groups = "drop"
-  ) %>%
-  mutate(
-    Subtype = dplyr::recode(Subtype,
-      "Nasopharyngeal Carcinoma (NPC)" = "NPC", "Kidney(RCC)" = "RCC",
-      "Melanoma" = "MM", "Melanoma(no MEL)" = "MM",
-      "Synovial Sarcoma (SYNS)" = "SYNS", "Urothelial_Carcinoma" = "Other"),
-    Subtype = if_else(is.na(Subtype), "Other", Subtype)
-  )
+            Subtype = first(Tumor_subtype_JW), Stage = first(NGS_stage_edit), Age = first(Age), .groups = "drop") %>%
+  mutate(Subtype = dplyr::recode(Subtype, "Nasopharyngeal Carcinoma (NPC)" = "NPC", "Kidney(RCC)" = "RCC",
+                                 "Melanoma" = "MM", "Melanoma(no MEL)" = "MM", 
+                                 "Synovial Sarcoma (SYNS)" = "SYNS", "Urothelial_Carcinoma" = "Other"),
+         Subtype = if_else(is.na(Subtype), "Other", Subtype))
 
 tumor_counts <- vaf_df %>% dplyr::count(Tumor, name = "n_samples") %>% arrange(desc(n_samples))
 vaf_df <- vaf_df %>%
@@ -146,22 +126,19 @@ stage_colors <- c("4" = "#AF6378", "3" = "#D7A9AB", "2" = "#E0C073", "1" = "#DEE
 
 pdf(file.path(outdir, "Figure1A_circos.pdf"), width = 12, height = 12)
 circos.clear()
-circos.par(start.degree = 60, cell.padding = c(0.005, 0.2, 0.005, 0.2),
-           track.margin = c(0.005, 0.005),
+circos.par(start.degree = 60, cell.padding = c(0.005, 0.2, 0.005, 0.2), track.margin = c(0.005, 0.005),
            gap.after = c(rep(1, nrow(tumor_counts) - 1), 30))
-circos.initialize(factors = tumor_counts$Tumor,
-                  xlim = cbind(rep(0, nrow(tumor_counts)), tumor_counts$n_samples))
+circos.initialize(factors = tumor_counts$Tumor, xlim = cbind(rep(0, nrow(tumor_counts)), tumor_counts$n_samples))
+
 
 # Track 1: tumor type.
 circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)),
              ylim = c(0, 1), track.height = 0.07, bg.border = NA,
              panel.fun = function(x, y) {
                s <- CELL_META$sector.index; xl <- CELL_META$xlim
-               circos.rect(xl[1], 0, xl[2], 1,
-                           col = unname(tumor_colors[s]), border = "black")
-               circos.text(mean(xl), 0.5, s, facing = "clockwise",
-                           niceFacing = TRUE, cex = 0.6, adj = c(0, 0.5))
-             })
+               circos.rect(xl[1], 0, xl[2], 1, col = unname(tumor_colors[s]), border = "black")
+               circos.text(mean(xl), 0.5, s, facing = "clockwise", niceFacing = TRUE, cex = 0.6, adj = c(0, 0.5))})
+
 
 # Track 2: subtype.
 circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)),
@@ -173,43 +150,30 @@ circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)),
                              col = unname(subtype_colors[vaf_df$Subtype[i]]), border = NA)
                }
                xl <- CELL_META$xlim
-               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")
-             })
+               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")})
+
 
 # Track 3: sex.
-circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)),
+circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)), 
              ylim = c(0, 1), track.height = 0.07, bg.border = NA,
              panel.fun = function(x, y) {
                ii <- which(as.character(vaf_df$sector) == CELL_META$sector.index)
                for (i in ii) {
                  this_color <- unname(sex_colors[vaf_df$Gender[i]])
                  if (is.na(this_color)) this_color <- "#CCCCCC"
-                 circos.rect(vaf_df$x[i] - 0.5, 0, vaf_df$x[i] + 0.5, 1,
-                             col = this_color, border = NA)
+                 circos.rect(vaf_df$x[i] - 0.5, 0, vaf_df$x[i] + 0.5, 1, col = this_color, border = NA)
                }
                xl <- CELL_META$xlim
-               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")
-             })
+               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")})
 
 
 # Track 4: age at diagnosis.
-
-# Exclude samples with missing or non-finite ages from this track.
-age_plot <- vaf_df %>%
-  filter(is.finite(x), is.finite(Age))
-
+age_plot <- vaf_df %>% filter(is.finite(x), is.finite(Age))
 age_ylim <- range(age_plot$Age)
 
-circos.track(
-  factors = age_plot$sector,
-  x = age_plot$x,
-  y = age_plot$Age,
-  ylim = age_ylim,
-  track.height = 0.10,
-  bg.border = NA,
-  panel.fun = function(x, y) {
+circos.track(factors = age_plot$sector, x = age_plot$x, y = age_plot$Age, ylim = age_ylim, track.height = 0.10, bg.border = NA, 
+             panel.fun = function(x, y) {
     
-    # Draw age profiles within each tumor type.
     valid <- is.finite(x) & is.finite(y)
     
     if (sum(valid) >= 2) {
@@ -217,62 +181,40 @@ circos.track(
       y2 <- y[valid]
       od <- order(x2)
       
-      circos.lines(
-        x2[od], y2[od],
-        type = "l",
-        col = "#1B9E77",
-        lwd = 1
-      )
-    }
+      circos.lines(x2[od], y2[od], type = "l", col = "#1B9E77", lwd = 1)}
     
     # Track border
     xlim <- CELL_META$xlim
     ylim <- CELL_META$ylim
     
-    circos.rect(
-      xlim[1], ylim[1], xlim[2], ylim[2],
-      border = "black", col = NA, lwd = 1
-    )
+    circos.rect(xlim[1], ylim[1], xlim[2], ylim[2], border = "black", col = NA, lwd = 1)
     
     # Y-axis
-    circos.yaxis(
-      side = "left",
-      at = pretty(age_ylim),
-      labels.cex = 0.4,
-      tick.length = circlize::convert_x(1, "mm")
-    )
-  }
-)
+    circos.yaxis(side = "left", at = pretty(age_ylim), labels.cex = 0.4, tick.length = circlize::convert_x(1, "mm"))})
 
 
 # Track 5: disease stage at NGS.
-circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)),
-             ylim = c(0, 1), track.height = 0.07, bg.border = NA,
+circos.track(factors = vaf_df$sector, x = vaf_df$x, y = rep(1, nrow(vaf_df)), ylim = c(0, 1), track.height = 0.07, bg.border = NA,
              panel.fun = function(x, y) {
                ii <- which(as.character(vaf_df$sector) == CELL_META$sector.index)
                for (i in ii) {
                  this_color <- unname(stage_colors[vaf_df$Stage[i]])
                  if (is.na(this_color)) this_color <- "#CCCCCC"
-                 circos.rect(vaf_df$x[i] - 0.5, 0, vaf_df$x[i] + 0.5, 1,
-                             col = this_color, border = NA)
+                 circos.rect(vaf_df$x[i] - 0.5, 0, vaf_df$x[i] + 0.5, 1, col = this_color, border = NA)
                }
                xl <- CELL_META$xlim
-               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")
-             })
+               circos.rect(xl[1], 0, xl[2], 1, col = NA, border = "black")})
+
 
 # Track 6: maximum VAF per sample, log10(max VAF + 1).
 vaf_df$log10_vaf <- log10(vaf_df$max_vaf + 1)
-circos.track(factors = vaf_df$sector, x = vaf_df$x, y = vaf_df$log10_vaf,
-             ylim = range(vaf_df$log10_vaf, na.rm = TRUE),
+circos.track(factors = vaf_df$sector, x = vaf_df$x, y = vaf_df$log10_vaf, ylim = range(vaf_df$log10_vaf, na.rm = TRUE),
              track.height = 0.15, bg.border = NA,
              panel.fun = function(x, y) {
                ii <- which(as.character(vaf_df$sector) == CELL_META$sector.index)
                ord <- order(vaf_df$x[ii])
-               circos.lines(vaf_df$x[ii][ord], vaf_df$log10_vaf[ii][ord],
-                            type = "h", col = "#888888")
-               circos.rect(CELL_META$xlim[1], CELL_META$ylim[1],
-                           CELL_META$xlim[2], CELL_META$ylim[2], border = "black", col = NA)
-             })
+               circos.lines(vaf_df$x[ii][ord], vaf_df$log10_vaf[ii][ord], type = "h", col = "#888888")
+               circos.rect(CELL_META$xlim[1], CELL_META$ylim[1], CELL_META$xlim[2], CELL_META$ylim[2], border = "black", col = NA)})
 
 circos.clear()
 dev.off()
@@ -281,25 +223,20 @@ dev.off()
 
 # Figure 1B: mutation-frequency heatmap and pathway proportions ---------
 # Multiple variants in the same gene and sample are counted only once.
-f1c <- axen_final3 %>% distinct(`SAMPLE ID`, Hugo_Symbol, .keep_all = TRUE)
-mutation_freq_df <- f1c %>%
-  distinct(Tumor, `SAMPLE ID`, Hugo_Symbol) %>%
+f1c <- maf %>% distinct(`SAMPLE ID`, Hugo_Symbol, .keep_all = TRUE)
+mutation_freq_df <- f1c %>% distinct(Tumor, `SAMPLE ID`, Hugo_Symbol) %>%
   dplyr::count(Tumor, Hugo_Symbol, name = "Mutation_Count") %>%
-  left_join(f1c %>% distinct(Tumor, `SAMPLE ID`) %>%
-              dplyr::count(Tumor, name = "Sample_Count"), by = "Tumor") %>%
+  left_join(f1c %>% distinct(Tumor, `SAMPLE ID`) %>% dplyr::count(Tumor, name = "Sample_Count"), by = "Tumor") %>%
   mutate(Mutation_Frequency = 100 * Mutation_Count / Sample_Count)
 
-mutation_matrix <- mutation_freq_df %>%
-  dplyr::select(Tumor, Hugo_Symbol, Mutation_Frequency) %>%
-  pivot_wider(names_from = Hugo_Symbol, values_from = Mutation_Frequency,
-              values_fill = 0) %>%
+mutation_matrix <- mutation_freq_df %>% dplyr::select(Tumor, Hugo_Symbol, Mutation_Frequency) %>%
+  pivot_wider(names_from = Hugo_Symbol, values_from = Mutation_Frequency, values_fill = 0) %>%
   as.data.frame()
 rownames(mutation_matrix) <- mutation_matrix$Tumor
 mutation_matrix$Tumor <- NULL
 mutation_matrix <- as.matrix(mutation_matrix)
 
-# The original figure orders cancer types by sample count, then ranks genes
-# by their summed mutation frequencies across cancer types.
+
 sample_per_tumor <- f1c %>% distinct(Tumor, `SAMPLE ID`) %>%
   dplyr::count(Tumor, name = "Sample_Count") %>% arrange(desc(Sample_Count))
 mutation_matrix <- mutation_matrix[sample_per_tumor$Tumor, , drop = FALSE]
@@ -311,14 +248,11 @@ OCG_list <- c("KRAS", "PIK3CA", "NOTCH1", "MTOR", "CTNNB1", "ERBB4", "ERBB2", "A
 mutation_colors <- c("Missense_Mutation" = "#FA8C6A", "Nonsense_Mutation" = "#F7D652",
                      "In_Frame_Ins" = "#52DEF7", "In_Frame_Del" = "#52DEF7",
                      "Frame_Shift_Ins" = "#854EED", "Frame_Shift_Del" = "#854EED", "Splice_Site" = "#69E056")
-mutation_prop <- f1c %>%
-  filter(Hugo_Symbol %in% rownames(mutation_matrix_tt)) %>%
+mutation_prop <- f1c %>% filter(Hugo_Symbol %in% rownames(mutation_matrix_tt)) %>%
   dplyr::count(Hugo_Symbol, Variant_Classification, name = "Count") %>%
-  group_by(Hugo_Symbol) %>% mutate(Proportion = Count / sum(Count)) %>%
-  ungroup() %>%
+  group_by(Hugo_Symbol) %>% mutate(Proportion = Count / sum(Count)) %>% ungroup() %>%
   dplyr::select(Hugo_Symbol, Variant_Classification, Proportion) %>%
-  pivot_wider(names_from = Variant_Classification, values_from = Proportion,
-              values_fill = 0) %>% as.data.frame()
+  pivot_wider(names_from = Variant_Classification, values_from = Proportion, values_fill = 0) %>% as.data.frame()
 rownames(mutation_prop) <- mutation_prop$Hugo_Symbol
 mutation_prop$Hugo_Symbol <- NULL
 mutation_prop <- as.matrix(mutation_prop[rownames(mutation_matrix_tt), , drop = FALSE])
@@ -329,46 +263,34 @@ top_anno <- HeatmapAnnotation(Sample_Counts = anno_barplot(
   setNames(sample_per_tumor$Sample_Count, sample_per_tumor$Tumor),
   gp = gpar(fill = "gray"), border = TRUE))
 gene_group <- setNames(ifelse(rownames(mutation_matrix_tt) %in% TSG_list, "TSG",
-                       ifelse(rownames(mutation_matrix_tt) %in% OCG_list, "OG", "Other")),
-                       rownames(mutation_matrix_tt))
+                       ifelse(rownames(mutation_matrix_tt) %in% OCG_list, "OG", "Other")), rownames(mutation_matrix_tt))
 tsg_col_fun <- colorRamp2(c(0, 30, 60, 100), c("white", "lightblue", "blue", "darkblue"))
 og_col_fun <- colorRamp2(c(0, 30, 60, 100), c("white", "pink", "red", "darkred"))
 other_col_fun <- colorRamp2(c(0, 30, 60, 100), c("white", "gray80", "gray50", "black"))
 
-ht <- Heatmap(mutation_matrix_tt, name = NULL,
-              cluster_rows = FALSE, cluster_columns = FALSE,
+ht <- Heatmap(mutation_matrix_tt, name = NULL, cluster_rows = FALSE, cluster_columns = FALSE,
               row_gap = unit(2, "mm"), column_gap = unit(2, "mm"),
               left_annotation = row_anno, top_annotation = top_anno,
               cell_fun = function(j, i, x, y, width, height, fill) {
                 gene <- rownames(mutation_matrix_tt)[i]
-                col_fun <- switch(gene_group[[gene]], TSG = tsg_col_fun,
-                                  OG = og_col_fun, Other = other_col_fun)
-                grid.rect(x, y, width, height,
-                          gp = gpar(fill = col_fun(mutation_matrix_tt[i, j]),
-                                    col = "white", lwd = 2))
-              })
+                col_fun <- switch(gene_group[[gene]], TSG = tsg_col_fun, OG = og_col_fun, Other = other_col_fun)
+                grid.rect(x, y, width, height, gp = gpar(fill = col_fun(mutation_matrix_tt[i, j]), col = "white", lwd = 2))})
 pdf(file.path(outdir, "Figure1B_mutation_heatmap.pdf"), width = 12, height = 8)
-draw(ht, annotation_legend_list = list(
-  Legend(col_fun = tsg_col_fun, title = "TSG Mutation Frequency"),
-  Legend(col_fun = og_col_fun, title = "OG Mutation Frequency")))
+draw(ht, annotation_legend_list = list(Legend(col_fun = tsg_col_fun, title = "TSG Mutation Frequency"),
+                                       Legend(col_fun = og_col_fun, title = "OG Mutation Frequency")))
 dev.off()
 
 
-# The pathway table is an upstream, precomputed analysis input. This code plots
-# AXEN_per values; it does not regenerate the gene-to-pathway annotations.
 pathway_df <- read.delim(pathway_file, sep = "\t", check.names = FALSE)
 stopifnot(all(c("Cancer", "Pathway", "AXEN_per") %in% names(pathway_df)))
-ordered_cancer <- colnames(mutation_matrix_tt)  # exactly the heatmap column order
-pathway_plot <- pathway_df %>%
-  mutate(Cancer = factor(Cancer, levels = ordered_cancer)) %>%
-  filter(!is.na(Cancer), !is.na(AXEN_per))
+ordered_cancer <- colnames(mutation_matrix_tt) 
+pathway_plot <- pathway_df %>% mutate(Cancer = factor(Cancer, levels = ordered_cancer)) %>% filter(!is.na(Cancer), !is.na(AXEN_per))
 
 p1b_pathway <- ggplot(pathway_plot, aes(x = Cancer, y = AXEN_per, fill = Pathway)) +
   geom_col(position = "fill") +
-  scale_fill_manual(values = c(
-    "Cell Cycle" = "#F6AAA5", "MYC" = "#C0D9E5", "NOTCH" = "#FCC48F",
-    "PI3K" = "#88C47B", "RTK-RAS" = "#D2C4D4", "TGF-Beta" = "#C9C86D",
-    "TP53" = "#8A7DA9", "WNT" = "#FFEA85")) +
+  scale_fill_manual(values = c("Cell Cycle" = "#F6AAA5", "MYC" = "#C0D9E5", "NOTCH" = "#FCC48F",
+                               "PI3K" = "#88C47B", "RTK-RAS" = "#D2C4D4", "TGF-Beta" = "#C9C86D",
+                               "TP53" = "#8A7DA9", "WNT" = "#FFEA85")) +
   scale_x_discrete(drop = FALSE) +
   labs(x = NULL, y = "Mutation frequency (%)") +
   theme_minimal() +
@@ -378,12 +300,9 @@ ggsave(file.path(outdir, "Figure1B_pathways.pdf"), p1b_pathway, width = 12, heig
 
 
 # Figure 1C: sample-level mutation count -------------------------------
-# Stage information is not used for filtering this panel.
 plot_count <- mutation_counts %>%
-  left_join(axen_final3 %>% distinct(Tumor_Sample_Barcode, Tumor),
-            by = "Tumor_Sample_Barcode")
-p1c <- ggplot(plot_count,
-              aes(x = fct_reorder(Tumor, count), y = log2(count), fill = Tumor)) +
+  left_join(maf %>% distinct(Tumor_Sample_Barcode, Tumor), by = "Tumor_Sample_Barcode")
+p1c <- ggplot(plot_count, aes(x = fct_reorder(Tumor, count), y = log2(count), fill = Tumor)) +
   geom_violin(trim = FALSE, scale = "width") +
   geom_boxplot(width = 0.3, outlier.shape = NA, alpha = 0.3) +
   scale_fill_manual(values = tumor_colors) +
@@ -396,14 +315,10 @@ ggsave(file.path(outdir, "Figure1C_mutation_count.pdf"), p1c, width = 12, height
 
 
 # Figure 1D: mut-H versus mut-L by tumor type ---------------------------
-# Denominator: unique ctDNA samples within each tumor type.
-df_ratio <- axen_final3 %>%
-  distinct(Tumor, Tumor_Sample_Barcode, count_edit) %>%
-  dplyr::count(Tumor, count_edit) %>%
-  group_by(Tumor) %>% mutate(ratio = n / sum(n)) %>% ungroup()
+df_ratio <- maf %>% distinct(Tumor, Tumor_Sample_Barcode, count_edit) %>%
+  dplyr::count(Tumor, count_edit) %>% group_by(Tumor) %>% mutate(ratio = n / sum(n)) %>% ungroup()
 mutH_order <- df_ratio %>% group_by(Tumor) %>%
-  summarise(mutH_ratio = sum(ratio[count_edit == "mut-H"], na.rm = TRUE),
-            .groups = "drop") %>%
+  summarise(mutH_ratio = sum(ratio[count_edit == "mut-H"], na.rm = TRUE), .groups = "drop") %>%
   arrange(desc(mutH_ratio)) %>% pull(Tumor)
 df_ratio$Tumor <- factor(df_ratio$Tumor, levels = mutH_order)
 p1d <- ggplot(df_ratio, aes(x = Tumor, y = ratio, fill = count_edit)) +
@@ -416,23 +331,19 @@ ggsave(file.path(outdir, "Figure1D_mutation_count_groups.pdf"), p1d, width = 12,
 
 
 # Figure 1E: MATH score (minimum 3 nonsynonymous mutations) -------------
-# Based on maftools::math.score, with the original default of 5 changed to 3.
-# Avoid the original interactive command trace(math.score, edit = TRUE).
 math_score_min3 <- function (maf, vafCol = NULL, sampleName = NULL, vafCutOff = 0.075) 
 {
   if (is.null(sampleName)) {
     sampleName = as.character(getSampleSummary(maf)[, Tumor_Sample_Barcode])
   }
-  dat = subsetMaf(maf, includeSyn = FALSE, tsb = sampleName, 
-                  mafObj = FALSE)
+  dat = subsetMaf(maf, includeSyn = FALSE, tsb = sampleName, mafObj = FALSE)
   if (!"t_vaf" %in% colnames(dat)) {
     if (is.null(vafCol)) {
       if (all(c("t_ref_count", "t_alt_count") %in% colnames(dat))) {
         message("t_vaf field is missing, but found t_ref_count & t_alt_count columns. Estimating vaf..")
         dat[, `:=`(t_ref_count, as.numeric(as.character(t_ref_count)))]
         dat[, `:=`(t_alt_count, as.numeric(as.character(t_alt_count)))]
-        dat[, `:=`(t_vaf, t_alt_count/(t_ref_count + 
-                                         t_alt_count))]
+        dat[, `:=`(t_vaf, t_alt_count/(t_ref_count + t_alt_count))]
       }
       else {
         print(colnames(maf))
@@ -460,8 +371,8 @@ math_score_min3 <- function (maf, vafCol = NULL, sampleName = NULL, vafCutOff = 
       abs.med.dev = abs(vaf - median(vaf))
       pat.mad = median(abs.med.dev) * 100
       pat.math = pat.mad * 1.4826/median(vaf)
-      d = data.table::data.table(Tumor_Sample_Barcode = as.character(unique(pat[, Tumor_Sample_Barcode])), MedianAbsoluteDeviation = pat.mad, 
-                                 MATH = pat.math)
+      d = data.table::data.table(Tumor_Sample_Barcode = as.character(unique(pat[, Tumor_Sample_Barcode])), 
+                                 MedianAbsoluteDeviation = pat.mad, MATH = pat.math)
       return(d)
     }
   })
@@ -470,7 +381,7 @@ math_score_min3 <- function (maf, vafCol = NULL, sampleName = NULL, vafCutOff = 
 }
 
 Axen_math <- math_score_min3(maf_obj, vafCutOff = 0) %>%
-  left_join(axen_final3 %>% distinct(Tumor_Sample_Barcode, Tumor), by = "Tumor_Sample_Barcode")
+  left_join(maf %>% distinct(Tumor_Sample_Barcode, Tumor), by = "Tumor_Sample_Barcode")
 message("Samples with MATH scores: ", nrow(Axen_math))
 p1e <- ggplot(Axen_math, aes(x = fct_reorder(Tumor, MATH), y = MATH, fill = Tumor)) +
   geom_boxplot() + scale_fill_manual(values = tumor_colors) +
@@ -482,16 +393,15 @@ ggsave(file.path(outdir, "Figure1E_MATH.pdf"), p1e, width = 12, height = 4)
 
 # Figure 1F: OncoKB v5.0 annotated alterations -------------------------
 # Original analytical strategy: 87 genes; restricted LUAD/LUSC/LCLC/NSCLCPD
-# for lung cancer and COADREAD for intestinal cancer; patient-level denominator.
+# for lung cancer and COADREAD for intestinal cancer; patient-level denominator
 onco <- readxl::read_xlsx(oncokb_file, sheet = "v5.0") %>%
   filter(is.na(annotation), !is.na(Tumor), Tumor != "Liquid") %>%
-  mutate(Tumor = if_else(Tumor == "Skin cancer", "Melanoma", Tumor)) %>%
   distinct(Level, Gene, Alterations, `Cancer Types`, Tumor, category, .keep_all = TRUE)
 
 genes <- read.delim(path = panel_file)
 KCA = data.frame(KCA = matrix(genes$`K&C&A_87`, ncol = 1, nrow = 87)) # 87개 genes
 onco <- onco %>% filter(Gene %in% KCA$KCA)
-axen_final4 <- axen_final3 %>% filter(Hugo_Symbol %in% KCA$KCA)
+axen_final4 <- maf %>% filter(Hugo_Symbol %in% KCA$KCA)
 onco_mut <- onco %>% filter(Alterations != "Wildtype")
 
 onco_wt <- onco %>% filter(Gene %in% c("KRAS", "NRAS"), Alterations == "Wildtype")
@@ -503,6 +413,7 @@ fig1g <- axen_final4 %>%
 fig1g$HGVSp_Short_edit <- sub("^p\\.", "", fig1g$HGVSp_Short)
 
 tumor_totals_axen <- fig1g %>% distinct(Tumor, `SUBJECT ID`) %>% group_by(Tumor) %>% summarise(AXEN_total = n(), .groups = "drop")
+
 
 ### 1) pan + all
 onco_pan_onco <- onco_mut %>% filter(Tumor == "Pan-cancer", category == "all_mutation")
@@ -517,6 +428,7 @@ onco_pan_onco11 <- onco_pan_onco1 %>%
             by = c("Hugo_Symbol" = "Gene")) %>% mutate(Level = as.character(Level)) %>%
   arrange(Tumor, Hugo_Symbol, HGVSp_Short_edit, factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)) %>%
   distinct(Tumor, Hugo_Symbol, HGVSp_Short_edit, .keep_all = TRUE)
+
 
 ### 2) pan + specific
 onco_pan_spe <- onco_mut %>% filter(Tumor == "Pan-cancer", category != "all_mutation") %>%
@@ -536,59 +448,33 @@ onco_pan_spe11 <- onco_pan_spe1 %>%
   arrange(Tumor, Hugo_Symbol, HGVSp_Short_edit, factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)) %>%
   distinct(Tumor, Hugo_Symbol, HGVSp_Short_edit, .keep_all = TRUE)
 
-### 3) specific cancer + all mut
-onco_spe_onco <- onco_mut %>%
-  filter(Tumor != "Pan-cancer", category == "all_mutation")
 
-onco_spe_onco1 <- fig1g %>%
-  filter(Hugo_Symbol %in% onco_spe_onco$Gene) %>%
-  semi_join(
-    onco_spe_onco,
-    by = c("Hugo_Symbol" = "Gene", "Tumor")
-  ) %>%
+### 3) specific cancer + all mut
+onco_spe_onco <- onco_mut %>% filter(Tumor != "Pan-cancer", category == "all_mutation")
+
+onco_spe_onco1 <- fig1g %>% filter(Hugo_Symbol %in% onco_spe_onco$Gene) %>%
+  semi_join(onco_spe_onco, by = c("Hugo_Symbol" = "Gene", "Tumor")) %>%
   group_by(Tumor, `SUBJECT ID`, Hugo_Symbol) %>%
   summarise(n = n(), .groups = "drop") %>%
   group_by(Tumor, Hugo_Symbol) %>%
   summarise(AXEN_mut = n(), .groups = "drop") %>%
   left_join(tumor_totals_axen, by = "Tumor") %>%
-  mutate(
-    AXEN_per = round(AXEN_mut / AXEN_total * 100, 2),
-    HGVSp_Short_edit = "all"
-  )
+  mutate(AXEN_per = round(AXEN_mut / AXEN_total * 100, 2), HGVSp_Short_edit = "all")
 
 onco_spe_onco11 <- onco_spe_onco1 %>%
-  left_join(
-    onco %>%
-      filter(Tumor != "Pan-cancer", category == "all_mutation") %>%
-      dplyr::select(Tumor, Gene, Level),
-    by = c("Tumor", "Hugo_Symbol" = "Gene")
-  ) %>%
+  left_join(onco %>% filter(Tumor != "Pan-cancer", category == "all_mutation") %>% 
+              dplyr::select(Tumor, Gene, Level), by = c("Tumor", "Hugo_Symbol" = "Gene")) %>%
   mutate(Level = as.character(Level)) %>%
-  arrange(
-    Tumor,
-    Hugo_Symbol,
-    HGVSp_Short_edit,
-    factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)
-  ) %>%
+  arrange(Tumor, Hugo_Symbol, HGVSp_Short_edit, factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)) %>%
   distinct(Tumor, Hugo_Symbol, HGVSp_Short_edit, .keep_all = TRUE)
 
+
 ### 4) specific cancer + specific mut
-onco_spe_spe <- onco_mut %>%
-  filter(Tumor != "Pan-cancer", category != "all_mutation")
+onco_spe_spe <- onco_mut %>% filter(Tumor != "Pan-cancer", category != "all_mutation")
 
 onco_spe_spe1 <- fig1g %>%
-  filter(
-    Hugo_Symbol %in% onco_spe_spe$Gene,
-    HGVSp_Short_edit %in% onco_spe_spe$Alterations
-  ) %>%
-  semi_join(
-    onco_spe_spe,
-    by = c(
-      "Hugo_Symbol" = "Gene",
-      "HGVSp_Short_edit" = "Alterations",
-      "Tumor"
-    )
-  ) %>%
+  filter(Hugo_Symbol %in% onco_spe_spe$Gene, HGVSp_Short_edit %in% onco_spe_spe$Alterations) %>%
+  semi_join(onco_spe_spe, by = c("Hugo_Symbol" = "Gene", "HGVSp_Short_edit" = "Alterations", "Tumor")) %>%
   group_by(Tumor, `SUBJECT ID`, Hugo_Symbol, HGVSp_Short_edit) %>%
   summarise(n = n(), .groups = "drop") %>%
   group_by(Tumor, Hugo_Symbol, HGVSp_Short_edit) %>%
@@ -597,41 +483,19 @@ onco_spe_spe1 <- fig1g %>%
   mutate(AXEN_per = round(AXEN_mut / AXEN_total * 100, 2))
 
 onco_spe_spe11 <- onco_spe_spe1 %>%
-  left_join(
-    onco %>%
-      filter(category != "all_mutation") %>%
-      dplyr::select(Tumor, Gene, Alterations, Level),
-    by = c(
-      "Tumor",
-      "Hugo_Symbol" = "Gene",
-      "HGVSp_Short_edit" = "Alterations"
-    )
-  ) %>%
-  left_join(
-    onco_pan_spe,
-    by = c(
-      "Hugo_Symbol" = "Gene",
-      "HGVSp_Short_edit" = "Alterations"
-    )
-  ) %>%
-  mutate(
-    Level = coalesce(Level, Pan_Level),
-    Level = as.character(Level)
-  ) %>%
+  left_join(onco %>% filter(category != "all_mutation") %>%
+              dplyr::select(Tumor, Gene, Alterations, Level),
+    by = c("Tumor", "Hugo_Symbol" = "Gene", "HGVSp_Short_edit" = "Alterations")) %>%
+  left_join(onco_pan_spe, by = c("Hugo_Symbol" = "Gene", "HGVSp_Short_edit" = "Alterations")) %>%
+  mutate(Level = coalesce(Level, Pan_Level), Level = as.character(Level)) %>%
   dplyr::select(-Pan_Level) %>%
-  arrange(
-    Tumor,
-    Hugo_Symbol,
-    HGVSp_Short_edit,
-    factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)
-  ) %>%
+  arrange(Tumor, Hugo_Symbol, HGVSp_Short_edit, factor(Level, levels = c("1", "2", "3", "4", NA), ordered = TRUE)) %>%
   distinct(Tumor, Hugo_Symbol, HGVSp_Short_edit, .keep_all = TRUE)
 
 
 ### K/RAS WT
 # 전체 환자 universe
-patient_universe <- fig1g %>%
-  distinct(Tumor, `SUBJECT ID`)
+patient_universe <- fig1g %>% distinct(Tumor, `SUBJECT ID`)
 
 # KRAS/NRAS mutation이 있는 환자
 ras_mut_patients <- fig1g %>%
