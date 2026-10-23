@@ -19,12 +19,10 @@ library(kernelshap)
 
 
 # Input files ------------------------------------------------------------
-# Original local filenames are retained so this script runs against the
-# validated study inputs. Patient-level inputs are not part of this repository.
-selected_sample_file <- "KM00_MASTER_DATASET_240726/03.3.KM00_NGS_FINAL_METADATA_FINALannotation_axenserial.xlsx"
-panel_file <- path.expand("~/Desktop/BLCA:UTUC/MAF/K-MASTER_panels_genelist.xlsx")
-oncokb_file <- "oncokb_biomarker_drug_associations_KM00_JSH_final.xlsx"
-processed_maf_file <- "axen_final3.rds"  # Original preprocessed ctDNA object
+selected_sample_file <- "KM00_CLINICAL_serial.xlsx"
+panel_file <- path.expand("K-MASTER_panels_genelist.xlsx")
+oncokb_file <- "oncokb_biomarker.xlsx"
+processed_maf_file <- read.delim("KM00_AXEN.maf.gz", sep = "\t", check.names = F) 
 outdir <- "results/Figure4"
 dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
